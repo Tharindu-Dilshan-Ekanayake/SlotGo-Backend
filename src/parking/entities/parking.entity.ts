@@ -47,14 +47,6 @@ export class Parking {
   @Column({ type: 'timestamp' })
   parkedTime: Date;
 
-  @ApiPropertyOptional({
-    example: '2026-05-18T10:30:00.000Z',
-    description:
-      'Auto-calculated expected end time (base package duration + additional package hours).',
-  })
-  @Column({ nullable: true, type: 'timestamp' })
-  expectedEndTime?: Date | null;
-
   @ApiPropertyOptional({ example: '2026-05-18T10:30:00.000Z' })
   @Column({ nullable: true, type: 'timestamp' })
   parkEndTime?: Date;
