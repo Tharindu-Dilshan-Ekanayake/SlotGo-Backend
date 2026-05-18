@@ -22,14 +22,19 @@ export class ParkingService {
   constructor(
     @InjectRepository(Parking)
     private readonly parkingRepository: Repository<Parking>,
+
     @InjectRepository(EndParking)
     private readonly endParkingRepository: Repository<EndParking>,
+
     @InjectRepository(Slot)
     private readonly slotsRepository: Repository<Slot>,
+
     @InjectRepository(Package)
     private readonly packagesRepository: Repository<Package>,
+
     @InjectRepository(Aditionalparking)
     private readonly aditionalparkingRepository: Repository<Aditionalparking>,
+
     private readonly dataSource: DataSource,
   ) {}
 
@@ -47,15 +52,20 @@ export class ParkingService {
       );
     }
 
+    const parkedTime = new Date(createParkingDto.parkedTime);
+
+    const baseHours = this.parsePackageHours(feePackage.timeDuration) || 0;
+
+    const parkEndTime = new Date(
+      parkedTime.getTime() + baseHours * 60 * 60 * 1000,
+    );
+
     const parking = this.parkingRepository.create({
       ...createParkingDto,
       token: await this.generateUniqueParkingToken(createParkingDto),
-      expectedEndTime: this.calculateExpectedEndTime(
-        createParkingDto.parkedTime,
-        feePackage,
-        undefined,
-      ),
+      parkEndTime,
     });
+
     const savedParking = await this.parkingRepository.save(parking);
 
     return this.findOne(savedParking.id);
@@ -64,7 +74,11 @@ export class ParkingService {
   async findAll(): Promise<{ total: number; data: ParkingDetails[] }> {
     const [data, total] = await this.parkingRepository.findAndCount({
       order: { id: 'ASC' },
-      relations: { feePackage: true, additionalFeePackage: true, parkingSlot: true },
+      relations: {
+        feePackage: true,
+        additionalFeePackage: true,
+        parkingSlot: true,
+      },
       where: { end: false },
     });
 
@@ -76,7 +90,11 @@ export class ParkingService {
 
   async findOne(id: number): Promise<ParkingDetails> {
     const parking = await this.parkingRepository.findOne({
-      relations: { feePackage: true, additionalFeePackage: true, parkingSlot: true },
+      relations: {
+        feePackage: true,
+        additionalFeePackage: true,
+        parkingSlot: true,
+      },
       where: { id, end: false },
     });
 
@@ -89,7 +107,11 @@ export class ParkingService {
 
   async findOneByToken(token: string): Promise<ParkingDetails> {
     const parking = await this.parkingRepository.findOne({
-      relations: { feePackage: true, additionalFeePackage: true, parkingSlot: true },
+      relations: {
+        feePackage: true,
+        additionalFeePackage: true,
+        parkingSlot: true,
+      },
       where: { token, end: false },
     });
 
@@ -114,47 +136,22 @@ export class ParkingService {
       await this.validateFeePackage(updateParkingDto.feePackageId);
     }
 
-    // Handle ongoing status update
-    const updateData: any = { ...updateParkingDto };
+    const updateData: any = {
+      ...updateParkingDto,
+    };
+
     if (updateParkingDto.ongoing !== undefined) {
       if (updateParkingDto.ongoing === true) {
-        // Mark as ongoing: clear the end time
-        updateData.parkEndTime = null;
         updateData.end = false;
-      } else if (updateParkingDto.ongoing === false) {
-        // Mark as ended: set the end time to now
-        updateData.parkEndTime = new Date();
+      } else {
         updateData.end = true;
+        updateData.parkEndTime = new Date();
       }
-      // Remove the ongoing field as it's not a database column
+
       delete updateData.ongoing;
     }
 
     await this.parkingRepository.update(id, updateData);
-
-    // Recalculate expected end time when parked time / base package changes
-    if (
-      updateParkingDto.parkedTime !== undefined ||
-      updateParkingDto.feePackageId !== undefined
-    ) {
-      const parking = await this.parkingRepository.findOne({
-        relations: {
-          feePackage: true,
-          additionalFeePackage: true,
-        },
-        where: { id, end: false },
-      });
-
-      if (parking) {
-        await this.parkingRepository.update(id, {
-          expectedEndTime: this.calculateExpectedEndTime(
-            parking.parkedTime,
-            parking.feePackage,
-            parking.additionalFeePackage,
-          ),
-        });
-      }
-    }
 
     return this.findOne(id);
   }
@@ -165,70 +162,63 @@ export class ParkingService {
   ): Promise<ParkingDetails> {
     await this.findOne(id);
 
-    const additionalFeePackageId =
-      updateAdditionalPackageDto.additionalFeePackageId;
-
-    if (additionalFeePackageId === null) {
-      await this.parkingRepository.update(id, {
-        additionalFeePackageId: null,
-      });
-
-      const parking = await this.parkingRepository.findOne({
-        relations: { feePackage: true },
-        where: { id, end: false },
-      });
-
-      if (parking) {
-        await this.parkingRepository.update(id, {
-          expectedEndTime: this.calculateExpectedEndTime(
-            parking.parkedTime,
-            parking.feePackage,
-            undefined,
-          ),
-        });
-      }
-
-      return this.findOne(id);
+    if (!updateAdditionalPackageDto.additionalFeePackageId) {
+      throw new NotFoundException('Additional package id required');
     }
 
-    const additionalFeePackage = await this.aditionalparkingRepository.findOneBy({
-      id: additionalFeePackageId,
-    });
+    const additionalFeePackage =
+      await this.aditionalparkingRepository.findOneBy({
+        id: Number(updateAdditionalPackageDto.additionalFeePackageId),
+      });
 
     if (!additionalFeePackage) {
-      throw new NotFoundException(`Package ${additionalFeePackageId} not found`);
+      throw new NotFoundException(
+        `Package ${updateAdditionalPackageDto.additionalFeePackageId} not found`,
+      );
     }
 
-    await this.parkingRepository.update(id, {
-      additionalFeePackageId: additionalFeePackage.id,
-    });
-
     const parking = await this.parkingRepository.findOne({
-      relations: { feePackage: true },
+      relations: {
+        feePackage: true,
+        additionalFeePackage: true,
+      },
       where: { id, end: false },
     });
 
-    if (parking) {
-      await this.parkingRepository.update(id, {
-        expectedEndTime: this.calculateExpectedEndTime(
-          parking.parkedTime,
-          parking.feePackage,
-          additionalFeePackage,
-        ),
-      });
+    if (!parking) {
+      throw new NotFoundException(`Parking ${id} not found`);
     }
+
+    const currentEndTime = parking.parkEndTime
+      ? new Date(parking.parkEndTime)
+      : new Date();
+
+    const additionalHours = additionalFeePackage.hours || 0;
+
+    const updatedEndTime = new Date(
+      currentEndTime.getTime() + additionalHours * 60 * 60 * 1000,
+    );
+
+    await this.parkingRepository.update(id, {
+      additionalFeePackageId: additionalFeePackage.id,
+      parkEndTime: updatedEndTime,
+    });
 
     return this.findOne(id);
   }
 
   async remove(id: number): Promise<{ deleted: true }> {
     await this.findOne(id);
+
     await this.parkingRepository.delete(id);
 
     return { deleted: true };
   }
 
-  async findEnded(): Promise<{ total: number; data: EndParking[] }> {
+  async findEnded(): Promise<{
+    total: number;
+    data: EndParking[];
+  }> {
     const [data, total] = await this.endParkingRepository.findAndCount({
       order: { id: 'DESC' },
       relations: {
@@ -248,7 +238,10 @@ export class ParkingService {
         feePackage: true,
         parkingSlot: true,
       },
-      where: { parkingId, end: true },
+      where: {
+        parkingId,
+        end: true,
+      },
     });
 
     if (!endedParking) {
@@ -264,9 +257,11 @@ export class ParkingService {
     id: number,
     endParkingDto: EndParkingDto,
   ): Promise<EndParking> {
-    // Fetch active parking record
     const parking = await this.parkingRepository.findOne({
-      relations: { feePackage: true, parkingSlot: true },
+      relations: {
+        feePackage: true,
+        parkingSlot: true,
+      },
       where: { id, end: false },
     });
 
@@ -274,7 +269,6 @@ export class ParkingService {
       throw new NotFoundException(`Active parking ${id} not found`);
     }
 
-    // Validate and fetch additional fee package if provided
     const additionalFeePackage =
       endParkingDto.additionalFeePackageId === undefined
         ? undefined
@@ -291,19 +285,17 @@ export class ParkingService {
       );
     }
 
-    // Calculate fees: base fees + additional fees (if provided)
     const parkEndTime = new Date();
+
     const baseFees = this.calculatePackageFees(parking.feePackage);
+
     const additionalFees = additionalFeePackage
       ? this.calculateAditionalparkingFees(additionalFeePackage)
       : 0;
+
     const fullFees = Number((baseFees + additionalFees).toFixed(2));
 
-    // Use transaction to ensure atomicity:
-    // 1. Log ended parking data to endparking table
-    // 2. Mark the parking record as ended in parking table (keep history)
     return this.dataSource.transaction<EndParking>(async (manager) => {
-      // Build the ended parking data, only including optional fields when they exist
       const endedParkingData: DeepPartial<EndParking> = {
         end: true,
         feePackage: parking.feePackage,
@@ -320,21 +312,20 @@ export class ParkingService {
         vehicleOwnerTelephone: parking.vehicleOwnerTelephone,
       };
 
-      // Only add additional fee package if it exists
       if (additionalFeePackage) {
         endedParkingData.additionalFeePackage = additionalFeePackage;
+
         endedParkingData.additionalFeePackageId = additionalFeePackage.id;
       }
 
-      // Create and log ended parking record
       const endedParking = manager
         .getRepository(EndParking)
         .create(endedParkingData);
+
       const savedEndedParking = await manager
         .getRepository(EndParking)
         .save(endedParking);
 
-      // Keep the original parking row, but mark it as ended
       await manager.getRepository(Parking).update(id, {
         end: true,
         parkEndTime,
@@ -345,7 +336,9 @@ export class ParkingService {
   }
 
   private async validateSlot(slotId: number): Promise<void> {
-    const slot = await this.slotsRepository.findOneBy({ id: slotId });
+    const slot = await this.slotsRepository.findOneBy({
+      id: slotId,
+    });
 
     if (!slot) {
       throw new NotFoundException(`Slot ${slotId} not found`);
@@ -367,6 +360,7 @@ export class ParkingService {
   ): Promise<string> {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const token = this.buildParkingToken(createParkingDto);
+
       const existingParking = await this.parkingRepository.findOne({
         select: { id: true },
         where: { token },
@@ -386,11 +380,14 @@ export class ParkingService {
         .replace(/[^a-z0-9]/gi, '')
         .toUpperCase()
         .slice(-7) || 'VEHICLE';
+
     const parkedDate =
       createParkingDto.parkedTime instanceof Date
         ? createParkingDto.parkedTime
         : new Date(createParkingDto.parkedTime);
+
     const timePart = parkedDate.getTime().toString(36).toUpperCase();
+
     const randomPart = randomBytes(3).toString('hex').toUpperCase();
 
     return `PRK-${vehiclePart}-${timePart}-${randomPart}`;
@@ -398,9 +395,11 @@ export class ParkingService {
 
   private toParkingDetails(parking: Parking): ParkingDetails {
     const baseFees = this.calculatePackageFees(parking.feePackage);
+
     const additionalFees = parking.additionalFeePackage
       ? this.calculateAditionalparkingFees(parking.additionalFeePackage)
       : 0;
+
     const fullFees = Number((baseFees + additionalFees).toFixed(2));
 
     return {
@@ -412,6 +411,7 @@ export class ParkingService {
 
   private calculatePackageFees(feePackage: Package): number {
     const packagePrice = feePackage.packagePrice;
+
     const offer = feePackage.offer;
 
     return Number((packagePrice - packagePrice * (offer / 100)).toFixed(2));
@@ -419,30 +419,13 @@ export class ParkingService {
 
   private calculateAditionalparkingFees(additional: Aditionalparking): number {
     const fee = additional.fee;
+
     const discount = additional.discount;
 
     return Number((fee - fee * (discount / 100)).toFixed(2));
   }
 
-  private calculateExpectedEndTime(
-    parkedTime: Date,
-    feePackage: Package,
-    additional?: Aditionalparking,
-  ): Date | null {
-    const baseHours = this.parsePackageHours(feePackage.timeDuration);
-
-    if (baseHours === null) {
-      return null;
-    }
-
-    const additionalHours = additional?.hours ?? 0;
-    const totalHours = baseHours + additionalHours;
-
-    return new Date(parkedTime.getTime() + totalHours * 60 * 60 * 1000);
-  }
-
   private parsePackageHours(timeDuration: string): number | null {
-    // Supports strings like: "2 hours", "1.5 hour", "3h"
     const match = timeDuration.match(/(\d+(?:\.\d+)?)/);
 
     if (!match) {
