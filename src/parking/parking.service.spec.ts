@@ -1,7 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
+import { Aditionalparking } from '../aditionalparking/entities/aditionalparking.entity';
 import { Package } from '../packages/entities/package.entity';
 import { Slot } from '../slots/entities/slot.entity';
+import { EndParking } from './entities/end-parking.entity';
 import { Parking } from './entities/parking.entity';
 import { ParkingService } from './parking.service';
 
@@ -27,12 +30,24 @@ describe('ParkingService', () => {
           useValue: repositoryMock,
         },
         {
+          provide: getRepositoryToken(EndParking),
+          useValue: repositoryMock,
+        },
+        {
           provide: getRepositoryToken(Slot),
           useValue: repositoryMock,
         },
         {
           provide: getRepositoryToken(Package),
           useValue: repositoryMock,
+        },
+        {
+          provide: getRepositoryToken(Aditionalparking),
+          useValue: repositoryMock,
+        },
+        {
+          provide: DataSource,
+          useValue: { transaction: jest.fn() },
         },
       ],
     }).compile();

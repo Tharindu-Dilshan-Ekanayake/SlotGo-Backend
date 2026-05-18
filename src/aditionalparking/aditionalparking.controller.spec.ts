@@ -1,30 +1,27 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ParkingController } from './parking.controller';
-import { ParkingService } from './parking.service';
+import { AditionalparkingController } from './aditionalparking.controller';
+import { AditionalparkingService } from './aditionalparking.service';
 
-describe('ParkingController', () => {
-  let controller: ParkingController;
+describe('AditionalparkingController', () => {
+  let controller: AditionalparkingController;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      controllers: [ParkingController],
+      controllers: [AditionalparkingController],
       providers: [
         {
-          provide: ParkingService,
+          provide: AditionalparkingService,
           useValue: {
             create: jest.fn(),
             findAll: jest.fn(),
             findOne: jest.fn(),
-            findOneByToken: jest.fn(),
-              updateAdditionalPackage: jest.fn(),
-            remove: jest.fn(),
             update: jest.fn(),
           },
         },
       ],
     }).compile();
 
-    controller = module.get<ParkingController>(ParkingController);
+    controller = module.get<AditionalparkingController>(AditionalparkingController);
   });
 
   it('should be defined', () => {

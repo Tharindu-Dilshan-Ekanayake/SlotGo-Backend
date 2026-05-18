@@ -9,6 +9,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Package } from '../../packages/entities/package.entity';
+import { Aditionalparking } from '../../aditionalparking/entities/aditionalparking.entity';
 import { Slot } from '../../slots/entities/slot.entity';
 
 @Entity('parking')
@@ -46,6 +47,14 @@ export class Parking {
   @Column({ type: 'timestamp' })
   parkedTime: Date;
 
+  @ApiPropertyOptional({
+    example: '2026-05-18T10:30:00.000Z',
+    description:
+      'Auto-calculated expected end time (base package duration + additional package hours).',
+  })
+  @Column({ nullable: true, type: 'timestamp' })
+  expectedEndTime?: Date | null;
+
   @ApiPropertyOptional({ example: '2026-05-18T10:30:00.000Z' })
   @Column({ nullable: true, type: 'timestamp' })
   parkEndTime?: Date;
@@ -62,6 +71,19 @@ export class Parking {
   @ManyToOne(() => Package, { nullable: false, onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'feePackageId' })
   feePackage: Package;
+
+  @ApiPropertyOptional({ example: 2, nullable: true })
+  @Column({ nullable: true })
+  additionalFeePackageId?: number | null;
+
+  @ApiPropertyOptional({ type: () => Aditionalparking })
+  @ManyToOne(() => Aditionalparking, {
+    nullable: true,
+    onDelete: 'RESTRICT',
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn({ name: 'additionalFeePackageId' })
+  additionalFeePackage?: Aditionalparking;
 
   @ApiProperty({ example: '2026-05-18T08:30:00.000Z' })
   @CreateDateColumn()

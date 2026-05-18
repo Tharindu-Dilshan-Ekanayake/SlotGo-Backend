@@ -9,6 +9,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Package } from '../../packages/entities/package.entity';
+import { Aditionalparking } from '../../aditionalparking/entities/aditionalparking.entity';
 import { Slot } from '../../slots/entities/slot.entity';
 
 const decimalTransformer = {
@@ -76,10 +77,14 @@ export class EndParking {
   @Column({ nullable: true })
   additionalFeePackageId?: number;
 
-  @ApiPropertyOptional({ type: () => Package })
-  @ManyToOne(() => Package, { nullable: true, onDelete: 'RESTRICT' })
+  @ApiPropertyOptional({ type: () => Aditionalparking })
+  @ManyToOne(() => Aditionalparking, {
+    nullable: true,
+    onDelete: 'RESTRICT',
+    createForeignKeyConstraints: false,
+  })
   @JoinColumn({ name: 'additionalFeePackageId' })
-  additionalFeePackage?: Package;
+  additionalFeePackage?: Aditionalparking;
 
   @ApiProperty({ example: 900 })
   @Column({

@@ -9,6 +9,7 @@ import {
   Post,
 } from '@nestjs/common';
 import {
+  ApiBody,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -18,6 +19,8 @@ import {
 import { ParkingService } from './parking.service';
 import { CreateParkingDto } from './dto/create-parking.dto';
 import { EndParkingDto } from './dto/end-parking.dto';
+import { ParkingTokenDto } from './dto/parking-token.dto';
+import { UpdateAdditionalPackageDto } from './dto/update-additional-package.dto';
 import { UpdateParkingDto } from './dto/update-parking.dto';
 import { EndParking } from './entities/end-parking.entity';
 import { Parking } from './entities/parking.entity';
@@ -77,6 +80,14 @@ export class ParkingController {
   })
   findAll() {
     return this.parkingService.findAll();
+  }
+
+  @Post('details')
+  @ApiOperation({ summary: 'Get one parking record by token (QR)' })
+  @ApiBody({ type: ParkingTokenDto })
+  @ApiOkResponse({ type: Parking })
+  findOneByToken(@Body() { token }: ParkingTokenDto) {
+    return this.parkingService.findOneByToken(token);
   }
 
   @Get('ended')
@@ -170,6 +181,21 @@ export class ParkingController {
     @Body() endParkingDto: EndParkingDto,
   ) {
     return this.parkingService.endParking(id, endParkingDto);
+  }
+
+  @Patch(':id/additional-package')
+  @ApiOperation({ summary: 'Update additional package for a parking record' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiBody({ type: UpdateAdditionalPackageDto })
+  @ApiOkResponse({ type: Parking })
+  updateAdditionalPackage(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() updateAdditionalPackageDto: UpdateAdditionalPackageDto,
+  ) {
+    return this.parkingService.updateAdditionalPackage(
+      id,
+      updateAdditionalPackageDto,
+    );
   }
 
   @Patch(':id')
