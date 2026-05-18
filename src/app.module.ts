@@ -8,6 +8,7 @@ import { UsersModule } from './users/users.module';
 import { SlotsModule } from './slots/slots.module';
 import { PackagesModule } from './packages/packages.module';
 import { ParkingModule } from './parking/parking.module';
+import { AditionalparkingModule } from './aditionalparking/aditionalparking.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { ParkingModule } from './parking/parking.module';
     SlotsModule,
     PackagesModule,
     ParkingModule,
+    AditionalparkingModule,
   ],
   controllers: [AppController],
   providers: [AppService],
