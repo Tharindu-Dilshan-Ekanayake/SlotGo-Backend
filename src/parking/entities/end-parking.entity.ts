@@ -11,11 +11,20 @@ import {
 import { Package } from '../../packages/entities/package.entity';
 import { Slot } from '../../slots/entities/slot.entity';
 
-@Entity('parking')
-export class Parking {
+const decimalTransformer = {
+  to: (value: number) => value,
+  from: (value: string | number) => Number(value),
+};
+
+@Entity('endparking')
+export class EndParking {
   @ApiProperty({ example: 1 })
   @PrimaryGeneratedColumn()
   id: number;
+
+  @ApiProperty({ example: 12 })
+  @Column()
+  parkingId: number;
 
   @ApiProperty({ example: 'CAB-1234' })
   @Column()
@@ -29,8 +38,8 @@ export class Parking {
   @Column()
   vehicleOwnerTelephone: string;
 
-  @ApiProperty({ example: 'PRK-CAB1234-ME7B9N2K-A1B2C3' })
-  @Column({ nullable: true, unique: true })
+  @ApiPropertyOptional({ example: 'PRK-CAB1234-ME7B9N2K-A1B2C3' })
+  @Column({ nullable: true })
   token?: string;
 
   @ApiProperty({ example: 1 })
@@ -46,12 +55,12 @@ export class Parking {
   @Column({ type: 'timestamp' })
   parkedTime: Date;
 
-  @ApiPropertyOptional({ example: '2026-05-18T10:30:00.000Z' })
-  @Column({ nullable: true, type: 'timestamp' })
-  parkEndTime?: Date;
+  @ApiProperty({ example: '2026-05-18T10:30:00.000Z' })
+  @Column({ type: 'timestamp' })
+  parkEndTime: Date;
 
-  @ApiProperty({ default: false, example: false })
-  @Column({ default: false })
+  @ApiProperty({ default: true, example: true })
+  @Column({ default: true })
   end: boolean;
 
   @ApiProperty({ example: 1 })
@@ -62,6 +71,24 @@ export class Parking {
   @ManyToOne(() => Package, { nullable: false, onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'feePackageId' })
   feePackage: Package;
+
+  @ApiPropertyOptional({ example: 2 })
+  @Column({ nullable: true })
+  additionalFeePackageId?: number;
+
+  @ApiPropertyOptional({ type: () => Package })
+  @ManyToOne(() => Package, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'additionalFeePackageId' })
+  additionalFeePackage?: Package;
+
+  @ApiProperty({ example: 900 })
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    transformer: decimalTransformer,
+  })
+  fullFees: number;
 
   @ApiProperty({ example: '2026-05-18T08:30:00.000Z' })
   @CreateDateColumn()

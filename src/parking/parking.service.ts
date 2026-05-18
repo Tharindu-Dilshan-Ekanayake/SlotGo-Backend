@@ -1,10 +1,13 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { randomBytes } from 'crypto';
+import { DataSource, DeepPartial, Repository } from 'typeorm';
 import { Package } from '../packages/entities/package.entity';
 import { Slot } from '../slots/entities/slot.entity';
 import { CreateParkingDto } from './dto/create-parking.dto';
+import { EndParkingDto } from './dto/end-parking.dto';
 import { UpdateParkingDto } from './dto/update-parking.dto';
+import { EndParking } from './entities/end-parking.entity';
 import { Parking } from './entities/parking.entity';
 
 export type ParkingDetails = Parking & {
@@ -17,25 +20,33 @@ export class ParkingService {
   constructor(
     @InjectRepository(Parking)
     private readonly parkingRepository: Repository<Parking>,
+    @InjectRepository(EndParking)
+    private readonly endParkingRepository: Repository<EndParking>,
     @InjectRepository(Slot)
     private readonly slotsRepository: Repository<Slot>,
     @InjectRepository(Package)
     private readonly packagesRepository: Repository<Package>,
+    private readonly dataSource: DataSource,
   ) {}
 
-  async create(createParkingDto: CreateParkingDto): Promise<Parking> {
+  async create(createParkingDto: CreateParkingDto): Promise<ParkingDetails> {
     await this.validateSlot(createParkingDto.slotId);
     await this.validateFeePackage(createParkingDto.feePackageId);
 
-    const parking = this.parkingRepository.create(createParkingDto);
+    const parking = this.parkingRepository.create({
+      ...createParkingDto,
+      token: await this.generateUniqueParkingToken(createParkingDto),
+    });
+    const savedParking = await this.parkingRepository.save(parking);
 
-    return this.parkingRepository.save(parking);
+    return this.findOne(savedParking.id);
   }
 
   async findAll(): Promise<{ total: number; data: ParkingDetails[] }> {
     const [data, total] = await this.parkingRepository.findAndCount({
       order: { id: 'ASC' },
       relations: { feePackage: true, parkingSlot: true },
+      where: { end: false },
     });
 
     return {
@@ -47,7 +58,7 @@ export class ParkingService {
   async findOne(id: number): Promise<ParkingDetails> {
     const parking = await this.parkingRepository.findOne({
       relations: { feePackage: true, parkingSlot: true },
-      where: { id },
+      where: { id, end: false },
     });
 
     if (!parking) {
@@ -71,7 +82,23 @@ export class ParkingService {
       await this.validateFeePackage(updateParkingDto.feePackageId);
     }
 
-    await this.parkingRepository.update(id, updateParkingDto);
+    // Handle ongoing status update
+    const updateData: any = { ...updateParkingDto };
+    if (updateParkingDto.ongoing !== undefined) {
+      if (updateParkingDto.ongoing === true) {
+        // Mark as ongoing: clear the end time
+        updateData.parkEndTime = null;
+        updateData.end = false;
+      } else if (updateParkingDto.ongoing === false) {
+        // Mark as ended: set the end time to now
+        updateData.parkEndTime = new Date();
+        updateData.end = true;
+      }
+      // Remove the ongoing field as it's not a database column
+      delete updateData.ongoing;
+    }
+
+    await this.parkingRepository.update(id, updateData);
 
     return this.findOne(id);
   }
@@ -81,6 +108,128 @@ export class ParkingService {
     await this.parkingRepository.delete(id);
 
     return { deleted: true };
+  }
+
+  async findEnded(): Promise<{ total: number; data: EndParking[] }> {
+    const [data, total] = await this.endParkingRepository.findAndCount({
+      order: { id: 'DESC' },
+      relations: {
+        additionalFeePackage: true,
+        feePackage: true,
+        parkingSlot: true,
+      },
+    });
+
+    return { total, data };
+  }
+
+  async findEndedByParkingId(parkingId: number): Promise<EndParking> {
+    const endedParking = await this.endParkingRepository.findOne({
+      relations: {
+        additionalFeePackage: true,
+        feePackage: true,
+        parkingSlot: true,
+      },
+      where: { parkingId, end: true },
+    });
+
+    if (!endedParking) {
+      throw new NotFoundException(
+        `Ended parking record for parking ${parkingId} not found`,
+      );
+    }
+
+    return endedParking;
+  }
+
+  async endParking(
+    id: number,
+    endParkingDto: EndParkingDto,
+  ): Promise<EndParking> {
+    // Fetch active parking record
+    const parking = await this.parkingRepository.findOne({
+      relations: { feePackage: true, parkingSlot: true },
+      where: { id, end: false },
+    });
+
+    if (!parking) {
+      throw new NotFoundException(`Active parking ${id} not found`);
+    }
+
+    // Validate and fetch additional fee package if provided
+    const additionalFeePackage =
+      endParkingDto.additionalFeePackageId === undefined
+        ? undefined
+        : await this.packagesRepository.findOneBy({
+            id: endParkingDto.additionalFeePackageId,
+          });
+
+    if (
+      endParkingDto.additionalFeePackageId !== undefined &&
+      !additionalFeePackage
+    ) {
+      throw new NotFoundException(
+        `Package ${endParkingDto.additionalFeePackageId} not found`,
+      );
+    }
+
+    if (additionalFeePackage && !additionalFeePackage.activeStatus) {
+      throw new BadRequestException(
+        `Package ${additionalFeePackage.id} is not active`,
+      );
+    }
+
+    // Calculate fees: base fees + additional fees (if provided)
+    const parkEndTime = new Date();
+    const baseFees = this.calculatePackageFees(parking.feePackage);
+    const additionalFees = additionalFeePackage
+      ? this.calculatePackageFees(additionalFeePackage)
+      : 0;
+    const fullFees = Number((baseFees + additionalFees).toFixed(2));
+
+    // Use transaction to ensure atomicity:
+    // 1. Log ended parking data to endparking table
+    // 2. Mark the parking record as ended in parking table (keep history)
+    return this.dataSource.transaction<EndParking>(async (manager) => {
+      // Build the ended parking data, only including optional fields when they exist
+      const endedParkingData: DeepPartial<EndParking> = {
+        end: true,
+        feePackage: parking.feePackage,
+        feePackageId: parking.feePackageId,
+        fullFees,
+        parkedTime: parking.parkedTime,
+        parkingId: parking.id,
+        parkingSlot: parking.parkingSlot,
+        parkEndTime,
+        slotId: parking.slotId,
+        token: parking.token,
+        vehicleNumber: parking.vehicleNumber,
+        vehicleOwnerName: parking.vehicleOwnerName,
+        vehicleOwnerTelephone: parking.vehicleOwnerTelephone,
+      };
+
+      // Only add additional fee package if it exists
+      if (additionalFeePackage) {
+        endedParkingData.additionalFeePackage = additionalFeePackage;
+        endedParkingData.additionalFeePackageId = additionalFeePackage.id;
+      }
+
+      // Create and log ended parking record
+      const endedParking = manager
+        .getRepository(EndParking)
+        .create(endedParkingData);
+      const savedEndedParking = await manager
+        .getRepository(EndParking)
+        .save(endedParking);
+
+      // Keep the original parking row, but mark it as ended
+      await manager.getRepository(Parking).update(id, {
+        end: true,
+        parkEndTime,
+      });
+
+      return savedEndedParking;
+    });
   }
 
   private async validateSlot(slotId: number): Promise<void> {
@@ -101,12 +250,42 @@ export class ParkingService {
     }
   }
 
+  private async generateUniqueParkingToken(
+    createParkingDto: CreateParkingDto,
+  ): Promise<string> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const token = this.buildParkingToken(createParkingDto);
+      const existingParking = await this.parkingRepository.findOne({
+        select: { id: true },
+        where: { token },
+      });
+
+      if (!existingParking) {
+        return token;
+      }
+    }
+
+    return this.buildParkingToken(createParkingDto);
+  }
+
+  private buildParkingToken(createParkingDto: CreateParkingDto): string {
+    const vehiclePart =
+      createParkingDto.vehicleNumber
+        .replace(/[^a-z0-9]/gi, '')
+        .toUpperCase()
+        .slice(-7) || 'VEHICLE';
+    const parkedDate =
+      createParkingDto.parkedTime instanceof Date
+        ? createParkingDto.parkedTime
+        : new Date(createParkingDto.parkedTime);
+    const timePart = parkedDate.getTime().toString(36).toUpperCase();
+    const randomPart = randomBytes(3).toString('hex').toUpperCase();
+
+    return `PRK-${vehiclePart}-${timePart}-${randomPart}`;
+  }
+
   private toParkingDetails(parking: Parking): ParkingDetails {
-    const packagePrice = parking.feePackage.packagePrice;
-    const offer = parking.feePackage.offer;
-    const fullFees = Number(
-      (packagePrice - packagePrice * (offer / 100)).toFixed(2),
-    );
+    const fullFees = this.calculatePackageFees(parking.feePackage);
 
     return {
       ...parking,
@@ -114,5 +293,12 @@ export class ParkingService {
       ongoing:
         parking.parkEndTime === undefined || parking.parkEndTime === null,
     };
+  }
+
+  private calculatePackageFees(feePackage: Package): number {
+    const packagePrice = feePackage.packagePrice;
+    const offer = feePackage.offer;
+
+    return Number((packagePrice - packagePrice * (offer / 100)).toFixed(2));
   }
 }

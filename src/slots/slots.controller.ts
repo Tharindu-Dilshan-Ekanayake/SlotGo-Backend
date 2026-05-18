@@ -53,6 +53,29 @@ export class SlotsController {
     return this.slotsService.findAll();
   }
 
+  @Get('available')
+  @ApiOperation({
+    summary: 'Get available slots (no ongoing parking)',
+  })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        total: 1,
+        data: [
+          {
+            id: 2,
+            name: 'Main Hall Slot B',
+            createdAt: '2026-05-17T00:00:00.000Z',
+            updatedAt: '2026-05-17T00:00:00.000Z',
+          },
+        ],
+      },
+    },
+  })
+  findAvailable() {
+    return this.slotsService.findAvailable();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get one slot' })
   @ApiParam({ name: 'id', type: Number })

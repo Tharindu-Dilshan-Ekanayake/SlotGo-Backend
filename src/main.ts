@@ -12,10 +12,60 @@ type DatabaseOptions = {
   type?: string;
 };
 
+function isPrivateLanHostname(hostname: string) {
+  const parts = hostname.split('.').map(Number);
+
+  if (
+    parts.length !== 4 ||
+    parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+  ) {
+    return false;
+  }
+
+  const [first, second] = parts;
+
+  return (
+    first === 10 ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168)
+  );
+}
+
+function isAllowedCorsOrigin(origin: string | undefined, allowedPorts: Set<string>) {
+  if (!origin) {
+    return true;
+  }
+
+  try {
+    const url = new URL(origin);
+
+    return (
+      url.protocol === 'http:' &&
+      allowedPorts.has(url.port) &&
+      (url.hostname === 'localhost' ||
+        url.hostname === '127.0.0.1' ||
+        isPrivateLanHostname(url.hostname))
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const configService = app.get(ConfigService);
+  const port = Number(configService.get<string>('PORT') ?? 8000);
+  const allowedCorsPorts = new Set(['3000', String(port)]);
+
   app.enableCors({
-    origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    origin: (origin, callback) => {
+      if (isAllowedCorsOrigin(origin, allowedCorsPorts)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(null, false);
+    },
     credentials: true,
   });
 
@@ -27,10 +77,8 @@ async function bootstrap() {
     }),
   );
 
-  const configService = app.get(ConfigService);
   const dataSource = app.get(DataSource);
   const logger = new Logger('Bootstrap');
-  const port = Number(configService.get<string>('PORT') ?? 8000);
   const databaseOptions = dataSource.options as DatabaseOptions;
   const swaggerPath = 'api';
 
@@ -49,9 +97,10 @@ async function bootstrap() {
     );
   }
 
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
   const appUrl = await app.getUrl();
   logger.log(`Application running on: ${appUrl}`);
+  logger.log(`Network access: http://YOUR-PC-IP:${port}`);
   logger.log(`Application port: ${port}`);
   logger.log(`Swagger docs: ${appUrl}/${swaggerPath}`);
 }
