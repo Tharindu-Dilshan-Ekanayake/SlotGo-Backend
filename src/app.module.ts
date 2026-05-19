@@ -9,6 +9,7 @@ import { SlotsModule } from './slots/slots.module';
 import { PackagesModule } from './packages/packages.module';
 import { ParkingModule } from './parking/parking.module';
 import { AditionalparkingModule } from './aditionalparking/aditionalparking.module';
+import { MessagesModule } from './messages/messages.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { AditionalparkingModule } from './aditionalparking/aditionalparking.modu
     PackagesModule,
     ParkingModule,
     AditionalparkingModule,
+    MessagesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
